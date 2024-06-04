@@ -1,0 +1,144 @@
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+getwd()
+setwd("/Users/christian/Desktop/AP_Assignment2/")
+
+patients = read.csv("patients.csv")
+encounters = read.csv("encounters.csv")
+conditions = read.csv("conditions.csv")
+
+##Part 1
+# This is to Filter the conditions for COVID-19 or Suspected COVID-19 patients
+covid_conditions = conditions[grep("COVID-19|Suspected COVID-19", conditions$DESCRIPTION), ]
+
+# Now to merge the COVID conditions with patient data
+covid_patients = merge(covid_conditions, patients, by.x = "PATIENT", by.y = "Id")
+
+# This will allow for distribution across counties
+county_distribution = group_by(covid_patients, COUNTY)  
+county_distribution = summarise(county_distribution, count = n())
+
+# Now to plot the distribution across counties
+ggplot(county_distribution, aes(x = reorder(COUNTY, -count), y = count)) +
+  geom_bar(stat = "identity", fill = "orange") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(title = "Distribution of COVID Patients across Counties",
+       x = "County",
+       y = "Number of Patients")
+
+# Now to calculate age from BirthDate and categorize into age groups
+# Calculate age
+covid_patients$Age = floor(interval(start = ymd(covid_patients$BIRTHDATE), 
+end = today()) / years(1))
+
+# This is for a creation of age groups
+covid_patients$AgeGroup = ifelse(covid_patients$Age <= 18, "0-18",
+                                  ifelse(covid_patients$Age <= 35, "19-35",
+                                         ifelse(covid_patients$Age <= 50, "36-50", "51+")))
+
+# This is for distribution across age groups
+# Group by 'AgeGroup' and calculate the count
+age_distribution = aggregate(PATIENT ~ AgeGroup, data = covid_patients, FUN = length)
+
+# Rename the count column for clarity
+names(age_distribution)[2] = "count"
+
+# Plotting the distribution across all of the age groups
+ggplot(age_distribution, aes(x = AgeGroup, y = count)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(title = "Distribution of COVID Patients across Age Groups",
+       x = "Age Group",
+       y = "Number of Patients")
+
+
+##Part 2
+# This is to merge all conditions with COVID-19 patients 
+all_conditions_covid = merge(covid_patients, conditions, by.x = "PATIENT", by.y = "PATIENT")
+
+# This will filter the necessary columns 
+all_conditions_covid = all_conditions_covid[, c("PATIENT", "DESCRIPTION.x", 
+                                                 "DESCRIPTION.y", "GENDER")]
+
+# This is to group by GENDER and DESCRIPTION, calculate the count, arrange it by the GENDER and the count
+top_conditions_by_gender = aggregate(PATIENT ~ GENDER + DESCRIPTION.x + DESCRIPTION.y, 
+                                      data = all_conditions_covid, FUN = length)
+top_conditions_by_gender = top_conditions_by_gender[order(top_conditions_by_gender$GENDER, 
+                                                           -top_conditions_by_gender$PATIENT), ]
+
+# This will allow us to get the top 10 conditions for males
+top_conditions_male = subset(top_conditions_by_gender, GENDER == "M")
+top_conditions_male = head(top_conditions_male[order(-top_conditions_male$PATIENT), ], 10)
+
+# This will allow us to get the top 10 conditions for females
+top_conditions_female = subset(top_conditions_by_gender, GENDER == "F")
+top_conditions_female = head(top_conditions_female[order(-top_conditions_female$PATIENT), ], 10)
+
+# Now to add a gender column to top_conditions_male and top_conditions_female
+top_conditions_male$GENDER = "Male"
+top_conditions_female$GENDER = "Female"
+
+# Combining the results into one table for ease
+top_conditions = rbind(top_conditions_male, top_conditions_female)
+
+# and now to display the top conditions 
+print(top_conditions)
+
+
+
+
+
+##Part 3
+# This will merge COVID patient data with encounters 
+covid_encounters = merge(covid_patients, encounters, by.x = "PATIENT", by.y = "PATIENT")
+
+# This will categorise age as I did before 
+covid_encounters$Age = floor(interval(start = ymd(covid_encounters$BIRTHDATE), 
+                                    end = today()) / years(1))
+
+# Then to similarly create age groups
+covid_encounters$AgeGroup = ifelse(covid_encounters$Age <= 18, "0-18",
+                                  ifelse(covid_encounters$Age <= 35, "19-35",
+                                         ifelse(covid_encounters$Age <= 50, "36-50", "51+")))
+
+# This will calculate hospitalisation rate by their age groups and gender respectively 
+hospitalisation_rate = covid_encounters %>% filter(ENCOUNTERCLASS %in% 
+         c("ambulatory", "emergency", "inpatient", "urgentcare")) %>% 
+group_by(AgeGroup, GENDER, ENCOUNTERCLASS) %>% summarise(count = n(), .groups = 'drop') 
+
+# This is here to create a bar plot of hospitalisation rate by age group and gender
+ggplot(hospitalisation_rate, aes(x = AgeGroup, y = count, fill = ENCOUNTERCLASS)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ GENDER) +
+  labs(title = "Hospitalisation Rate by Age Group and Gender",
+       x = "Age Group",
+       y = "Number of Encounters",
+       fill = "Encounter Class")
+
+
+
+##Part 4 
+# This is to add recovery status to COVID patients to tell if they died or not
+covid_patients$RecoveryStatus = ifelse(is.na(covid_patients$DEATHDATE),
+                                       "Got better", "Passed away") 
+
+# This is to merge with conditions to analyse symptoms 
+covid_recovery_conditions = merge(covid_patients, conditions, by.x = "PATIENT", by.y = "PATIENT") 
+
+
+# Group by recovery status, age group, and gender
+grouped_recovery = group_by(covid_recovery_conditions, RecoveryStatus, AgeGroup, GENDER)
+
+
+# Summarise all of the counts
+recovery_analysis = summarise(grouped_recovery, count = n(), .groups = 'drop')
+
+
+# Now to create a bar plot of recovery status by age group and gender
+ggplot(recovery_analysis, aes(x = AgeGroup, y = count, fill = RecoveryStatus)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ GENDER) +
+  labs(title = "Recovery Status by Age Group and Gender",
+       x = "Age Group",
+       y = "Number of Patients",
+       fill = "Recovery Status")
